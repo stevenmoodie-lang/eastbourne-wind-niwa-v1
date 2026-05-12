@@ -82,6 +82,7 @@ def get_weather_data():
         "sunrise": pd.to_datetime(r_sun["daily"]["sunrise"]),
         "sunset": pd.to_datetime(r_sun["daily"]["sunset"])
     })
+    
     return df, sun
 
 def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
@@ -146,14 +147,17 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
             duration = (p2['time'] - p1['time']).total_seconds()
             frac = (t_start - p1['time']).total_seconds() / duration if duration > 0 else 0
             interp_speed = p1['speed'] + frac * (p2['speed'] - p1['speed'])
-            
-            # Capture speed at current time for labeling
-            if show_now_line and t_start <= now_ts < t_end:
-                now_frac = (now_ts - t_start).total_seconds() / (t_end - t_start).total_seconds()
-                now_speed = interp_speed + now_frac * ( (p1['speed'] + ((t_end - p1['time']).total_seconds()/duration)*(p2['speed']-p1['speed'])) - interp_speed)
 
+            # Calculate "Now" Speed for labeling
+            if show_now_line and t_start <= now_ts < t_end:
+                seg_duration = (t_end - t_start).total_seconds()
+                now_frac = (now_ts - t_start).total_seconds() / seg_duration if seg_duration > 0 else 0
+                speed_end_seg = interp_speed + (p2['speed']-p1['speed']) * (seg_duration / duration) if duration > 0 else interp_speed
+                now_speed = interp_speed + now_frac * (speed_end_seg - interp_speed)
+            
             is_night = t_start < sr or t_start >= ss
             alpha = 0.12 if is_night else 1.0
+            
             seg_duration = (t_end - t_start).total_seconds()
             speed_end = interp_speed + (p2['speed']-p1['speed']) * (seg_duration / duration) if duration > 0 else interp_speed
 
@@ -163,21 +167,26 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
                 mode='lines', showlegend=False, hoverinfo='skip'
             ))
 
-    # Current Wind Speed Label
-    if show_now_line and now_ts and now_speed is not None:
+    # --- NOW LINE & CLOSE LABEL ---
+    if show_now_line and now_ts:
         fig_main.add_vline(x=now_ts, line_width=1, line_dash="dash", line_color="white", opacity=0.6)
-        fig_main.add_annotation(
-            x=now_ts, y=now_speed, text=f"<b>{int(round(now_speed))}</b>",
-            showarrow=True, arrowhead=0, arrowcolor="rgba(0,0,0,0)",
-            ax=18, ay=0, font=dict(size=11, color=get_color(now_speed)),
-            bgcolor="rgba(61, 90, 115, 0.8)"
-        )
+        if now_speed is not None:
+            fig_main.add_annotation(
+                x=now_ts, y=now_speed,
+                text=f"<b>{int(round(now_speed))}</b>",
+                showarrow=False,
+                xanchor="left",
+                xshift=5,
+                font=dict(size=11, color=get_color(now_speed)),
+                bgcolor="rgba(61, 90, 115, 0.6)"
+            )
 
     # Daytime Labels & Peak Annotations
     for _, day_sun in df_sun.iterrows():
         sr, ss = pd.Timestamp(day_sun['sunrise']), pd.Timestamp(day_sun['sunset'])
         midpoint = sr + (ss - sr) / 2
         fig_main.add_annotation(x=midpoint, y=max_wind + 6, text=f"<b>{day_sun['date'].strftime('%a')}</b>", showarrow=False, font=dict(size=9, color="rgba(255,255,255,0.6)"))
+        
         day_mask = (df_hourly['time'] >= sr) & (df_hourly['time'] <= ss)
         day_data = df_hourly[day_mask]
         if not day_data.empty:
@@ -206,6 +215,7 @@ try:
     df_all, sun_all = get_weather_data()
     now_nz = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=12))).replace(tzinfo=None)
 
+    # Week 1
     s1 = sun_all.iloc[:7]
     label_1 = f"{s1.iloc[0]['date'].strftime('%b %d')} - {s1.iloc[-1]['date'].strftime('%d')}"
     st.markdown(f'<div class="section-label">{label_1}</div>', unsafe_allow_html=True)
@@ -214,6 +224,7 @@ try:
 
     st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1rem 0;'>", unsafe_allow_html=True)
 
+    # Week 2
     s2 = sun_all.iloc[7:14]
     if not s2.empty:
         label_2 = f"{s2.iloc[0]['date'].strftime('%b %d')} - {s2.iloc[-1]['date'].strftime('%d')}"
