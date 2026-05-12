@@ -44,19 +44,19 @@ st.markdown("""
 # --- SETTINGS ---
 LAT, LON = -41.405, 174.867
 
-def get_color(kmh, alpha=1.0):
-    """Original scale logic preserved"""
-    if kmh <= 5: return f"rgba(169, 201, 217, {alpha})"     # 0-5: Light Blue
-    if kmh <= 10: return f"rgba(92, 169, 204, {alpha})"    # 6-10: Blue
-    if kmh <= 15: return f"rgba(122, 214, 134, {alpha})"   # 11-15: Green
-    if kmh <= 20: return f"rgba(255, 230, 109, {alpha})"   # 16-20: Yellow
-    if kmh <= 25: return f"rgba(255, 126, 121, {alpha})"   # 21-25: Orange
-    if kmh <= 30: return f"rgba(224, 49, 49, {alpha})"     # 26-30: Red
-    return f"rgba(153, 5, 5, {alpha})"                       # 31+: Dark Red
+def get_color(val, alpha=1.0):
+    """Color logic based purely on the raw number provided"""
+    if val <= 5: return f"rgba(169, 201, 217, {alpha})"     # 0-5
+    if val <= 10: return f"rgba(92, 169, 204, {alpha})"    # 6-10
+    if val <= 15: return f"rgba(122, 214, 134, {alpha})"   # 11-15
+    if val <= 20: return f"rgba(255, 230, 109, {alpha})"   # 16-20
+    if val <= 25: return f"rgba(255, 126, 121, {alpha})"   # 21-25
+    if val <= 30: return f"rgba(224, 49, 49, {alpha})"     # 26-30
+    return f"rgba(153, 5, 5, {alpha})"                       # 31+
 
 @st.cache_data(ttl=600)
 def get_weather_data():
-    # 1. Fetch NIWA High-Res Wind Data (Returns km/h)
+    # 1. Fetch NIWA High-Res Wind Data
     niwa_url = "https://weather-api-azure.niwa.co.nz/api/grid/combined"
     niwa_params = {"lat": LAT, "long": LON}
     r_niwa = requests.get(niwa_url, params=niwa_params, timeout=15).json()
@@ -67,9 +67,10 @@ def get_weather_data():
         if t.tzinfo is not None:
             t = t.tz_convert("Pacific/Auckland").tz_localize(None)
         
+        # Pulling 'wind_speed' directly - no math applied
         records.append({
             "time": t,
-            "speed": f.get("wind_speed", 0), # Pure km/h from NIWA
+            "speed": f.get("wind_speed", 0), 
             "dir": f.get("wind_direction", 0)
         })
     df = pd.DataFrame(records)
