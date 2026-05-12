@@ -45,7 +45,7 @@ st.markdown("""
 LAT, LON = -41.405, 174.867
 
 def get_color(val, alpha=1.0):
-    """Color logic based purely on the raw number provided"""
+    """Color logic based purely on the raw sustained km/h value"""
     if val <= 5: return f"rgba(169, 201, 217, {alpha})"     # 0-5
     if val <= 10: return f"rgba(92, 169, 204, {alpha})"    # 6-10
     if val <= 15: return f"rgba(122, 214, 134, {alpha})"   # 11-15
@@ -67,7 +67,7 @@ def get_weather_data():
         if t.tzinfo is not None:
             t = t.tz_convert("Pacific/Auckland").tz_localize(None)
         
-        # Pulling 'wind_speed' directly - no math applied
+        # Strictly pulling 'wind_speed' (sustained) - no conversion
         records.append({
             "time": t,
             "speed": f.get("wind_speed", 0), 
@@ -167,6 +167,7 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
 # --- EXECUTION ---
 try:
     df_all, sun_all = get_weather_data()
+    # Fixed timezone offset for NZ (Standard Time is +12, Daylight is +13)
     now_nz = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=12))).replace(tzinfo=None)
 
     # BLOCK 1: Week 1
