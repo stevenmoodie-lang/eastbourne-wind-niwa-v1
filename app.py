@@ -181,4 +181,9 @@ try:
 
     s2 = sun_all.iloc[7:14]
     if not s2.empty:
-        st.markdown(f'<div class="section-label">{s2.iloc[0]["date"].strftime("%b %d")} - {s2.iloc[-1]["date"].strftime("%d")}</div>',
+        st.markdown(f'<div class="section-label">{s2.iloc[0]["date"].strftime("%b %d")} - {s2.iloc[-1]["date"].strftime("%d")}</div>', unsafe_allow_html=True)
+        mask2 = (df_all['time'] >= pd.Timestamp(s2.iloc[0]['date'])) & (df_all['time'] < pd.Timestamp(s2.iloc[-1]['date']) + pd.Timedelta(days=1))
+        render_forecast_block(df_all[mask2], s2)
+
+except Exception as e:
+    st.error(f"NIWA Data Unavailable: {e}")
