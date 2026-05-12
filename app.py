@@ -42,10 +42,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- SETTINGS ---
-LAT, LON = -41.405, 174.867
+# UPDATED COORDINATES: Switched from Baring Head to Eastbourne/Rona Wharf
+LAT, LON = -41.290, 174.900
 
 def get_color(val, alpha=1.0):
-    """Pure logic based on km/h values"""
+    """Color logic based on km/h values"""
     if val <= 5: return f"rgba(169, 201, 217, {alpha})"     # 0-5
     if val <= 10: return f"rgba(92, 169, 204, {alpha})"    # 6-10
     if val <= 15: return f"rgba(122, 214, 134, {alpha})"   # 11-15
@@ -56,7 +57,6 @@ def get_color(val, alpha=1.0):
 
 @st.cache_data(ttl=600)
 def get_weather_data():
-    # 1. Fetch NIWA Data
     niwa_url = "https://weather-api-azure.niwa.co.nz/api/grid/combined"
     niwa_params = {"lat": LAT, "long": LON}
     r_niwa = requests.get(niwa_url, params=niwa_params, timeout=15).json()
@@ -67,9 +67,7 @@ def get_weather_data():
         if t.tzinfo is not None:
             t = t.tz_convert("Pacific/Auckland").tz_localize(None)
         
-        # KEY CHANGE: Specifically check for wind_speed_mean. 
-        # In the combined API, 'wind_speed' is often the hourly peak (gust).
-        # 'wind_speed_mean' is the 10-minute sustained average.
+        # Using wind_speed_mean for sustained (steady) wind
         speed_val = f.get("wind_speed_mean", f.get("wind_speed", 0))
         
         records.append({
@@ -79,7 +77,7 @@ def get_weather_data():
         })
     df = pd.DataFrame(records)
 
-    # 2. Fetch Solar Data (Open-Meteo)
+    # Fetch Solar Data
     sun_url = "https://api.open-meteo.com/v1/forecast"
     sun_params = {
         "latitude": LAT, "longitude": LON,
@@ -183,9 +181,4 @@ try:
 
     s2 = sun_all.iloc[7:14]
     if not s2.empty:
-        st.markdown(f'<div class="section-label">{s2.iloc[0]["date"].strftime("%b %d")} - {s2.iloc[-1]["date"].strftime("%d")}</div>', unsafe_allow_html=True)
-        mask2 = (df_all['time'] >= pd.Timestamp(s2.iloc[0]['date'])) & (df_all['time'] < pd.Timestamp(s2.iloc[-1]['date']) + pd.Timedelta(days=1))
-        render_forecast_block(df_all[mask2], s2)
-
-except Exception as e:
-    st.error(f"NIWA Data Unavailable: {e}")
+        st.markdown(f'<div class="section-label">{s2.iloc[0]["date"].strftime("%b %d")} - {s2.iloc[-1]["date"].strftime("%d")}</div>',
