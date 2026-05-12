@@ -45,7 +45,7 @@ st.markdown("""
 LAT, LON = -41.405, 174.867
 
 def get_color(val, alpha=1.0):
-    """Color logic based on the final km/h value"""
+    """Pure logic based on km/h values"""
     if val <= 5: return f"rgba(169, 201, 217, {alpha})"     # 0-5
     if val <= 10: return f"rgba(92, 169, 204, {alpha})"    # 6-10
     if val <= 15: return f"rgba(122, 214, 134, {alpha})"   # 11-15
@@ -56,42 +56,30 @@ def get_color(val, alpha=1.0):
 
 @st.cache_data(ttl=600)
 def get_weather_data():
-    # 1. Fetch NIWA High-Res Wind Data
+    # 1. Fetch NIWA Data
     niwa_url = "https://weather-api-azure.niwa.co.nz/api/grid/combined"
     niwa_params = {"lat": LAT, "long": LON}
     r_niwa = requests.get(niwa_url, params=niwa_params, timeout=15).json()
     
-    forecasts = r_niwa.get("forecast", [])
-    
-    # --- AUTO-DETECTION LAYER ---
-    # Detects if raw data is m/s or knots and normalizes to km/h
-    sample_speeds = [f.get("wind_speed", 0) for f in forecasts[:5]]
-    avg_sample = sum(sample_speeds) / len(sample_speeds) if sample_speeds else 0
-    
-    multiplier = 1.0
-    if 0 < avg_sample < 8:
-        multiplier = 3.6    # Likely m/s to km/h
-    elif 8 <= avg_sample < 18:
-        multiplier = 1.852  # Likely knots to km/h
-
     records = []
-    for f in forecasts:
+    for f in r_niwa.get("forecast", []):
         t = pd.to_datetime(f["datetime"])
         if t.tzinfo is not None:
             t = t.tz_convert("Pacific/Auckland").tz_localize(None)
         
-        # Prioritize mean speed (sustained) over 'wind_speed' (which is often gust/max)
-        raw_val = f.get("wind_speed_mean", f.get("wind_speed", 0))
-        final_kmh = raw_val * multiplier
+        # KEY CHANGE: Specifically check for wind_speed_mean. 
+        # In the combined API, 'wind_speed' is often the hourly peak (gust).
+        # 'wind_speed_mean' is the 10-minute sustained average.
+        speed_val = f.get("wind_speed_mean", f.get("wind_speed", 0))
         
         records.append({
             "time": t,
-            "speed": final_kmh, 
+            "speed": speed_val, 
             "dir": f.get("wind_direction", 0)
         })
     df = pd.DataFrame(records)
 
-    # 2. Fetch Solar Data from Open-Meteo
+    # 2. Fetch Solar Data (Open-Meteo)
     sun_url = "https://api.open-meteo.com/v1/forecast"
     sun_params = {
         "latitude": LAT, "longitude": LON,
@@ -134,11 +122,11 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
             fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color="rgba(0,0,0,0)"), showlegend=False))
             continue
         
-        val = s['speed']
-        fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color=get_color(val)), showlegend=False))
+        current_speed = s['speed']
+        fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color=get_color(current_speed)), showlegend=False))
         heading = (s['dir'] + 180) % 360
         fig_ribbon.add_annotation(x=s['x_id'], y=0.5, text="➤", showarrow=False, textangle=heading-90, font=dict(size=7, color="white"))
-        fig_ribbon.add_annotation(x=s['x_id'], y=-0.3, text=f"<b>{int(round(val))}</b>", showarrow=False, font=dict(size=7, color="white"))
+        fig_ribbon.add_annotation(x=s['x_id'], y=-0.3, text=f"<b>{int(round(current_speed))}</b>", showarrow=False, font=dict(size=7, color="white"))
 
     fig_ribbon.update_layout(
         height=85, margin=dict(l=5, r=5, t=25, b=10), template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -186,7 +174,6 @@ try:
     df_all, sun_all = get_weather_data()
     now_nz = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=12))).replace(tzinfo=None)
 
-    # Week 1
     s1 = sun_all.iloc[:7]
     st.markdown(f'<div class="section-label">{s1.iloc[0]["date"].strftime("%b %d")} - {s1.iloc[-1]["date"].strftime("%d")}</div>', unsafe_allow_html=True)
     mask1 = (df_all['time'] >= pd.Timestamp(s1.iloc[0]['date'])) & (df_all['time'] < pd.Timestamp(s1.iloc[-1]['date']) + pd.Timedelta(days=1))
@@ -194,7 +181,6 @@ try:
 
     st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1rem 0;'>", unsafe_allow_html=True)
 
-    # Week 2
     s2 = sun_all.iloc[7:14]
     if not s2.empty:
         st.markdown(f'<div class="section-label">{s2.iloc[0]["date"].strftime("%b %d")} - {s2.iloc[-1]["date"].strftime("%d")}</div>', unsafe_allow_html=True)
