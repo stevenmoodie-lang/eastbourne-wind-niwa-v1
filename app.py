@@ -45,7 +45,7 @@ st.markdown("""
 LAT, LON = -41.405, 174.867
 
 def get_color(val, alpha=1.0):
-    """Color logic based purely on the raw sustained km/h value"""
+    """Pure logic based on the raw sustained number"""
     if val <= 5: return f"rgba(169, 201, 217, {alpha})"     # 0-5
     if val <= 10: return f"rgba(92, 169, 204, {alpha})"    # 6-10
     if val <= 15: return f"rgba(122, 214, 134, {alpha})"   # 11-15
@@ -56,7 +56,6 @@ def get_color(val, alpha=1.0):
 
 @st.cache_data(ttl=600)
 def get_weather_data():
-    # 1. Fetch NIWA High-Res Wind Data
     niwa_url = "https://weather-api-azure.niwa.co.nz/api/grid/combined"
     niwa_params = {"lat": LAT, "long": LON}
     r_niwa = requests.get(niwa_url, params=niwa_params, timeout=15).json()
@@ -67,15 +66,19 @@ def get_weather_data():
         if t.tzinfo is not None:
             t = t.tz_convert("Pacific/Auckland").tz_localize(None)
         
-        # Strictly pulling 'wind_speed' (sustained) - no conversion
+        # We try to get 'wind_speed_mean' first, as 'wind_speed' 
+        # in the combined grid often maps to the hourly MAX (the gust).
+        # If mean isn't there, we take the standard speed but assume it's the baseline.
+        raw_sustained = f.get("wind_speed_mean", f.get("wind_speed", 0))
+        
         records.append({
             "time": t,
-            "speed": f.get("wind_speed", 0), 
+            "speed": raw_sustained, 
             "dir": f.get("wind_direction", 0)
         })
     df = pd.DataFrame(records)
 
-    # 2. Fetch Solar Data from Open-Meteo
+    # Fetch Solar Data
     sun_url = "https://api.open-meteo.com/v1/forecast"
     sun_params = {
         "latitude": LAT, "longitude": LON,
@@ -109,6 +112,7 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
             if not d.empty:
                 rads = np.deg2rad(d['dir'])
                 avg_dir = np.rad2deg(np.arctan2(np.sin(rads).mean(), np.cos(rads).mean())) % 360
+                # Using the mean of the sustained speeds for the block
                 segments.append({"x_id": f"{day['date']}_{i}", "speed": d['speed'].mean(), "dir": avg_dir})
         segments.append({"x_id": f"{day['date']}_spacer", "spacer": True})
 
@@ -117,10 +121,12 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
         if "spacer" in s:
             fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color="rgba(0,0,0,0)"), showlegend=False))
             continue
-        fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color=get_color(s['speed'])), showlegend=False))
+        
+        current_val = s['speed']
+        fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color=get_color(current_val)), showlegend=False))
         heading = (s['dir'] + 180) % 360
         fig_ribbon.add_annotation(x=s['x_id'], y=0.5, text="➤", showarrow=False, textangle=heading-90, font=dict(size=7, color="white"))
-        fig_ribbon.add_annotation(x=s['x_id'], y=-0.3, text=f"<b>{round(s['speed'])}</b>", showarrow=False, font=dict(size=7, color="white"))
+        fig_ribbon.add_annotation(x=s['x_id'], y=-0.3, text=f"<b>{int(round(current_val))}</b>", showarrow=False, font=dict(size=7, color="white"))
 
     fig_ribbon.update_layout(
         height=85, margin=dict(l=5, r=5, t=25, b=10), template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -147,7 +153,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
             mode='lines', showlegend=False, hoverinfo='skip'
         ))
 
-    # Night Shading & Icons
     for i in range(len(df_sun)-1):
         ss = pd.Timestamp(df_sun.iloc[i]['sunset'])
         sr_next = pd.Timestamp(df_sun.iloc[i+1]['sunrise'])
@@ -167,10 +172,9 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
 # --- EXECUTION ---
 try:
     df_all, sun_all = get_weather_data()
-    # Fixed timezone offset for NZ (Standard Time is +12, Daylight is +13)
+    # Using NZST (+12)
     now_nz = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=12))).replace(tzinfo=None)
 
-    # BLOCK 1: Week 1
     s1 = sun_all.iloc[:7]
     st.markdown(f'<div class="section-label">{s1.iloc[0]["date"].strftime("%b %d")} - {s1.iloc[-1]["date"].strftime("%d")}</div>', unsafe_allow_html=True)
     mask1 = (df_all['time'] >= pd.Timestamp(s1.iloc[0]['date'])) & (df_all['time'] < pd.Timestamp(s1.iloc[-1]['date']) + pd.Timedelta(days=1))
@@ -178,7 +182,6 @@ try:
 
     st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1rem 0;'>", unsafe_allow_html=True)
 
-    # BLOCK 2: Week 2
     s2 = sun_all.iloc[7:14]
     if not s2.empty:
         st.markdown(f'<div class="section-label">{s2.iloc[0]["date"].strftime("%b %d")} - {s2.iloc[-1]["date"].strftime("%d")}</div>', unsafe_allow_html=True)
