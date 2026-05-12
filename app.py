@@ -38,25 +38,25 @@ st.markdown("""
             text-transform: uppercase;
         }
     </style>
-    <div class="custom-title">Eastbourne Wind (NIWA 1.5km)</div>
+    <div class="custom-title">Eastbourne Wind (km/h)</div>
 """, unsafe_allow_html=True)
 
 # --- SETTINGS ---
 LAT, LON = -41.405, 174.867
-KMH_TO_KNOTS = 0.539957
 
-def get_color(knots, alpha=1.0):
-    if knots <= 5: return f"rgba(169, 201, 217, {alpha})"
-    if knots <= 10: return f"rgba(92, 169, 204, {alpha})"
-    if knots <= 15: return f"rgba(122, 214, 134, {alpha})"
-    if knots <= 20: return f"rgba(255, 230, 109, {alpha})"
-    if knots <= 25: return f"rgba(255, 126, 121, {alpha})"
-    if knots <= 30: return f"rgba(224, 49, 49, {alpha})"
-    return f"rgba(153, 5, 5, {alpha})"
+def get_color(kmh, alpha=1.0):
+    """Original scale logic preserved"""
+    if kmh <= 5: return f"rgba(169, 201, 217, {alpha})"     # 0-5: Light Blue
+    if kmh <= 10: return f"rgba(92, 169, 204, {alpha})"    # 6-10: Blue
+    if kmh <= 15: return f"rgba(122, 214, 134, {alpha})"   # 11-15: Green
+    if kmh <= 20: return f"rgba(255, 230, 109, {alpha})"   # 16-20: Yellow
+    if kmh <= 25: return f"rgba(255, 126, 121, {alpha})"   # 21-25: Orange
+    if kmh <= 30: return f"rgba(224, 49, 49, {alpha})"     # 26-30: Red
+    return f"rgba(153, 5, 5, {alpha})"                       # 31+: Dark Red
 
 @st.cache_data(ttl=600)
 def get_weather_data():
-    # 1. Fetch NIWA High-Res Wind Data
+    # 1. Fetch NIWA High-Res Wind Data (Returns km/h)
     niwa_url = "https://weather-api-azure.niwa.co.nz/api/grid/combined"
     niwa_params = {"lat": LAT, "long": LON}
     r_niwa = requests.get(niwa_url, params=niwa_params, timeout=15).json()
@@ -69,12 +69,12 @@ def get_weather_data():
         
         records.append({
             "time": t,
-            "speed": f.get("wind_speed", 0) * KMH_TO_KNOTS,
+            "speed": f.get("wind_speed", 0), # Pure km/h from NIWA
             "dir": f.get("wind_direction", 0)
         })
     df = pd.DataFrame(records)
 
-    # 2. Fetch Solar Data from Open-Meteo (NIWA API is wind-focused)
+    # 2. Fetch Solar Data from Open-Meteo
     sun_url = "https://api.open-meteo.com/v1/forecast"
     sun_params = {
         "latitude": LAT, "longitude": LON,
