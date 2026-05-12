@@ -55,7 +55,6 @@ def get_color(val, alpha=1.0):
 
 @st.cache_data(ttl=600)
 def get_weather_data():
-    # 1. NIWA Data Fetching
     niwa_url = "https://weather-api-azure.niwa.co.nz/api/grid/combined"
     niwa_params = {"lat": LAT, "long": LON}
     r_niwa = requests.get(niwa_url, params=niwa_params, timeout=15).json()
@@ -65,15 +64,12 @@ def get_weather_data():
         t = pd.to_datetime(f["datetime"])
         if t.tzinfo is not None:
             t = t.tz_convert("Pacific/Auckland").tz_localize(None)
-        
-        # Use mean speed for steady wind
         speed_val = f.get("wind_speed_mean", f.get("wind_speed", 0))
         records.append({
             "time": t, "speed": speed_val, "dir": f.get("wind_direction", 0)
         })
     df = pd.DataFrame(records)
 
-    # 2. Solar Data Fetching (Required for day/night shading)
     sun_url = "https://api.open-meteo.com/v1/forecast"
     sun_params = {
         "latitude": LAT, "longitude": LON,
@@ -86,7 +82,6 @@ def get_weather_data():
         "sunrise": pd.to_datetime(r_sun["daily"]["sunrise"]),
         "sunset": pd.to_datetime(r_sun["daily"]["sunset"])
     })
-    
     return df, sun
 
 def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
@@ -115,7 +110,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
         if "spacer" in s:
             fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color="rgba(0,0,0,0)", line_width=0), showlegend=False))
             continue
-        
         val = s['speed']
         fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color=get_color(val), line_width=0), showlegend=False))
         heading = (s['dir'] + 180) % 360
@@ -133,6 +127,7 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
 
     # --- 2. COMPACT WIND DASHBOARD ---
     fig_main = go.Figure()
+    now_speed = None
 
     for i in range(len(df_hourly)-1):
         p1, p2 = df_hourly.iloc[i], df_hourly.iloc[i+1]
@@ -152,10 +147,13 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
             frac = (t_start - p1['time']).total_seconds() / duration if duration > 0 else 0
             interp_speed = p1['speed'] + frac * (p2['speed'] - p1['speed'])
             
+            # Capture speed at current time for labeling
+            if show_now_line and t_start <= now_ts < t_end:
+                now_frac = (now_ts - t_start).total_seconds() / (t_end - t_start).total_seconds()
+                now_speed = interp_speed + now_frac * ( (p1['speed'] + ((t_end - p1['time']).total_seconds()/duration)*(p2['speed']-p1['speed'])) - interp_speed)
+
             is_night = t_start < sr or t_start >= ss
             alpha = 0.12 if is_night else 1.0
-            
-            # Draw segment
             seg_duration = (t_end - t_start).total_seconds()
             speed_end = interp_speed + (p2['speed']-p1['speed']) * (seg_duration / duration) if duration > 0 else interp_speed
 
@@ -165,12 +163,21 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
                 mode='lines', showlegend=False, hoverinfo='skip'
             ))
 
+    # Current Wind Speed Label
+    if show_now_line and now_ts and now_speed is not None:
+        fig_main.add_vline(x=now_ts, line_width=1, line_dash="dash", line_color="white", opacity=0.6)
+        fig_main.add_annotation(
+            x=now_ts, y=now_speed, text=f"<b>{int(round(now_speed))}</b>",
+            showarrow=True, arrowhead=0, arrowcolor="rgba(0,0,0,0)",
+            ax=18, ay=0, font=dict(size=11, color=get_color(now_speed)),
+            bgcolor="rgba(61, 90, 115, 0.8)"
+        )
+
     # Daytime Labels & Peak Annotations
     for _, day_sun in df_sun.iterrows():
         sr, ss = pd.Timestamp(day_sun['sunrise']), pd.Timestamp(day_sun['sunset'])
         midpoint = sr + (ss - sr) / 2
         fig_main.add_annotation(x=midpoint, y=max_wind + 6, text=f"<b>{day_sun['date'].strftime('%a')}</b>", showarrow=False, font=dict(size=9, color="rgba(255,255,255,0.6)"))
-        
         day_mask = (df_hourly['time'] >= sr) & (df_hourly['time'] <= ss)
         day_data = df_hourly[day_mask]
         if not day_data.empty:
@@ -187,9 +194,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
         night_midpoint = ss + (sr_next - ss) / 2
         fig_main.add_annotation(x=night_midpoint, y=-2.5, text="☾", showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.35)"))
 
-    if show_now_line and now_ts:
-        fig_main.add_vline(x=now_ts, line_width=1, line_dash="dash", line_color="white", opacity=0.6)
-
     fig_main.update_layout(
         height=200, margin=dict(l=10, r=10, t=5, b=5), template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         xaxis=dict(visible=False, fixedrange=False, range=[crop_start, crop_end]), 
@@ -202,7 +206,6 @@ try:
     df_all, sun_all = get_weather_data()
     now_nz = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=12))).replace(tzinfo=None)
 
-    # Week 1
     s1 = sun_all.iloc[:7]
     label_1 = f"{s1.iloc[0]['date'].strftime('%b %d')} - {s1.iloc[-1]['date'].strftime('%d')}"
     st.markdown(f'<div class="section-label">{label_1}</div>', unsafe_allow_html=True)
@@ -211,7 +214,6 @@ try:
 
     st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1rem 0;'>", unsafe_allow_html=True)
 
-    # Week 2
     s2 = sun_all.iloc[7:14]
     if not s2.empty:
         label_2 = f"{s2.iloc[0]['date'].strftime('%b %d')} - {s2.iloc[-1]['date'].strftime('%d')}"
