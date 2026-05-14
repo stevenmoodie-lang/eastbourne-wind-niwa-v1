@@ -55,6 +55,7 @@ def get_color(val, alpha=1.0):
 
 @st.cache_data(ttl=600)
 def get_weather_data():
+    # Fetch Open-Meteo data - already requested in knots
     om_url = "https://api.open-meteo.com/v1/forecast"
     om_params = {
         "latitude": LAT, "longitude": LON,
@@ -64,6 +65,7 @@ def get_weather_data():
     }
     r = requests.get(om_url, params=om_params).json()
     
+    # Data is already in knots, no conversion needed
     df_all = pd.DataFrame({
         "time": pd.to_datetime(r["hourly"]["time"]),
         "speed": r["hourly"]["wind_speed_10m"],
@@ -146,7 +148,7 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
         if now_speed is not None:
             fig_main.add_annotation(x=now_ts, y=now_speed, text=f"<b>{int(round(now_speed))}</b>", showarrow=False, xanchor="left", xshift=5, font=dict(size=11, color=get_color(now_speed)), bgcolor="rgba(61, 90, 115, 0.6)")
     
-    # --- ADDED: High/Low Indicators ---
+    # --- High/Low Indicators ---
     for _, day_sun in df_sun.iterrows():
         sr, ss = pd.Timestamp(day_sun['sunrise']), pd.Timestamp(day_sun['sunset'])
         day_mask = (df_hourly['time'] >= sr) & (df_hourly['time'] <= ss)
