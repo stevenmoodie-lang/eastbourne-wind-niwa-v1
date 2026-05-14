@@ -42,7 +42,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- SETTINGS ---
-LAT, LON = -41.319, 174.839
+# Updated coordinates for Wellington Harbour entrance area
+LAT, LON = -41.275, 174.825 
 KMH_TO_KNOTS = 0.539957
 
 def get_color(val, alpha=1.0):
@@ -56,7 +57,7 @@ def get_color(val, alpha=1.0):
 
 @st.cache_data(ttl=600)
 def get_weather_data():
-    # 1. Fetch Open-Meteo (Always used for Sun data and as a fallback)
+    # 1. Fetch Open-Meteo
     om_url = "https://api.open-meteo.com/v1/forecast"
     om_params = {
         "latitude": LAT, "longitude": LON,
@@ -81,12 +82,10 @@ def get_weather_data():
         niwa_records = []
         for f in r_niwa.get("forecast", []):
             t = pd.to_datetime(f["datetime"])
-            # Ensure time matches NZ timezone
             speed_kts = f.get("wind_speed_mean", f.get("wind_speed", 0)) * KMH_TO_KNOTS
             niwa_records.append({"time": t, "speed": speed_kts, "dir": f.get("wind_direction", 0)})
         
         df_niwa = pd.DataFrame(niwa_records)
-        # Apply 7-day filter
         limit_date = df_om['time'].min() + pd.Timedelta(days=7)
         df_niwa = df_niwa[df_niwa['time'] < limit_date]
         
@@ -94,10 +93,8 @@ def get_weather_data():
         df_final = pd.concat([df_niwa, df_om[df_om['time'] >= limit_date]]).reset_index(drop=True)
         
     except Exception:
-        # Fallback if NIWA fails
         df_final = df_om
 
-    # 3. Process Sun data
     sun = pd.DataFrame({
         "date": pd.to_datetime(r_om["daily"]["time"]).date,
         "sunrise": pd.to_datetime(r_om["daily"]["sunrise"]),
