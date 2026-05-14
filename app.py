@@ -196,9 +196,9 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
 
 # --- EXECUTION ---
 try:
-    # --- LIVE IFRAME ---
+    # --- LIVE IFRAME (Using Winzurf) ---
     st.markdown('<div class="section-label">Live Front Lead Observation</div>', unsafe_allow_html=True)
-    components.iframe("https://www.centreport.co.nz/images/forms/PortWeather.html", height=200, scrolling=False)
+    components.iframe("https://winzurf.co.nz/front-lead-centerport/", height=250, scrolling=True)
     st.markdown("<br>", unsafe_allow_html=True) 
 
     df_all, sun_all = get_weather_data()
