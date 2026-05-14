@@ -1,3 +1,15 @@
+import streamlit as st
+import requests
+import pandas as pd
+import plotly.graph_objects as go
+import datetime
+import numpy as np
+import urllib3
+
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Wellington Harbour Wind (Kts)", layout="wide")
+
+
 @st.cache_data(ttl=600)
 def get_weather_data():
     # 1. Fetch NIWA (First 7 days)
