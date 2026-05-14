@@ -28,7 +28,6 @@ st.markdown("""
             margin-bottom: 0.5rem;
             white-space: nowrap;
         }
-        /* Live Report Styling */
         .live-container {
             background: rgba(0, 0, 0, 0.3);
             border-radius: 10px;
@@ -72,21 +71,29 @@ st.markdown("""
 LAT, LON = -41.319, 174.839
 KMH_TO_KNOTS = 0.539957
 
-# --- LIVE SCRAPER (IMPROVED) ---
+# --- LIVE SCRAPER (ROBUST VERSION) ---
 @st.cache_data(ttl=120) 
 def get_front_lead_live():
     try:
+        # Using the official CentrePort URL which is more stable than the NDBC domain
         url = "https://www.centreport.co.nz/images/forms/PortWeather.html"
-        # Headers make us look like a real browser
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
         r = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(r.text, 'lxml')
+        r.encoding = 'utf-8' # Ensure correct character encoding
+        
+        # Use html.parser as it's built-in to Python (doesn't require lxml)
+        soup = BeautifulSoup(r.text, 'html.parser')
         table = soup.find('table')
         
         if table:
             for row in table.find_all('tr'):
-                cols = [ele.text.strip() for ele in row.find_all('td')]
-                if len(cols) > 4 and "Front Lead" in cols[0]:
+                # Clean up the text: remove non-breaking spaces and whitespace
+                cols = [ele.text.replace('\xa0', ' ').strip() for ele in row.find_all(['td', 'th'])]
+                
+                # Check for "Front Lead" (case insensitive and fuzzy)
+                if len(cols) > 4 and "front" in cols[0].lower() and "lead" in cols[0].lower():
                     return {
                         "time": cols[1],
                         "dir": cols[2],
@@ -94,9 +101,11 @@ def get_front_lead_live():
                         "gust": cols[4]
                     }
     except Exception as e:
+        # Return none to trigger the "unavailable" message in the UI
         return None
     return None
 
+# --- HELPER FUNCTIONS ---
 def get_color(val, alpha=1.0):
     if val <= 10: return f"rgba(169, 201, 217, {alpha})"
     if val <= 15: return f"rgba(92, 169, 204, {alpha})"
@@ -138,7 +147,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
     crop_start = pd.Timestamp(df_sun['sunrise'].min())
     crop_end = pd.Timestamp(df_sun['sunset'].max())
 
-    # --- 1. DYNAMIC ARROW RIBBON ---
     segments = []
     for _, day in df_sun.iterrows():
         sunrise, sunset = pd.Timestamp(day['sunrise']), pd.Timestamp(day['sunset'])
@@ -173,7 +181,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
     )
     st.plotly_chart(fig_ribbon, use_container_width=True, config={'displayModeBar': False})
 
-    # --- 2. COMPACT WIND DASHBOARD ---
     fig_main = go.Figure()
     now_speed = None
     for i in range(len(df_hourly)-1):
@@ -230,7 +237,7 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
 
 # --- EXECUTION ---
 
-# 1. Fetch Live Report (Now with better reliability)
+# 1. Fetch Live Report
 live_data = get_front_lead_live()
 
 # 2. Render Live Report Banner
@@ -258,7 +265,6 @@ if live_data:
     </div>
     """, unsafe_allow_html=True)
 else:
-    # Optional: message if live data is temporarily down
     st.info("Live Front Lead data currently unavailable.")
 
 # 3. Render Forecast Graphs
