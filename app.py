@@ -45,6 +45,7 @@ st.markdown("""
 LAT, LON = -41.319, 174.839 
 KMH_TO_KNOTS = 0.539957
 
+# --- UPDATED COLOR CATEGORIES ---
 def get_color(val, alpha=1.0):
     if val <= 5: return f"rgba(169, 201, 217, {alpha})"   # Light Blue (1-5)
     if val <= 10: return f"rgba(92, 169, 204, {alpha})"  # Blue (6-10)
@@ -66,7 +67,7 @@ def get_weather_data():
     }
     r_om = requests.get(om_url, params=om_params, timeout=10).json()
     
-    # Crucial: .dt.tz_localize(None) avoids the comparison error
+    # Standardize to timezone-naive to prevent comparison errors
     df_om = pd.DataFrame({
         "time": pd.to_datetime(r_om["hourly"]["time"]).tz_localize(None),
         "speed": r_om["hourly"]["wind_speed_10m"],
@@ -100,4 +101,4 @@ def get_weather_data():
     
     return df_final, sun
 
-# ... [The render_forecast_block and EXECUTION logic remains the same] ...
+# ... [The rest of your original render_forecast_block and EXECUTION remains exactly as you had it] ...
