@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import requests
 import pandas as pd
 import plotly.graph_objects as go
@@ -43,6 +42,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- SETTINGS ---
+# Updated coordinates for Wellington Harbour entrance area
 LAT, LON = -41.275, 174.825 
 KMH_TO_KNOTS = 0.539957
 
@@ -196,11 +196,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
 
 # --- EXECUTION ---
 try:
-    # --- LIVE IFRAME (Using Winzurf) ---
-    st.markdown('<div class="section-label">Live Front Lead Observation</div>', unsafe_allow_html=True)
-    components.iframe("https://winzurf.co.nz/front-lead-centerport/", height=250, scrolling=True)
-    st.markdown("<br>", unsafe_allow_html=True) 
-
     df_all, sun_all = get_weather_data()
     now_nz = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=12))).replace(tzinfo=None)
     s1 = sun_all.iloc[:7]
