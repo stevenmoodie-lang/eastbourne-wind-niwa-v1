@@ -88,7 +88,7 @@ st.markdown("""
 
 # Updated coordinates for Wellington Harbour entrance area
 
-LAT, LON = -41.275, 174.825 
+LAT, LON = -41.319, 174.839 
 
 KMH_TO_KNOTS = 0.539957
 
