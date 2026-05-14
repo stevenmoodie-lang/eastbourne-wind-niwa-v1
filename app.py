@@ -6,7 +6,7 @@ import datetime
 import numpy as np
 from bs4 import BeautifulSoup
 
-# --- PAGE CONFIG (Must be the first Streamlit command) ---
+# --- PAGE CONFIG ---
 st.set_page_config(page_title="Wellington Harbour Wind (Kts)", layout="wide")
 
 # --- SETTINGS & CONSTANTS ---
@@ -14,46 +14,48 @@ LAT, LON = -41.319, 174.839
 KMH_TO_KNOTS = 0.539957
 
 # --- LIVE SCRAPER ---
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=60)
 def get_front_lead_live():
     try:
         url = "https://ndbc.co.nz/centreport/weather.php" 
+        # A very standard browser header
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://winzurf.co.nz/'
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
         }
-        r = requests.get(url, headers=headers, timeout=10)
-        # Verify we actually got a successful response
+        
+        r = requests.get(url, headers=headers, timeout=15)
         if r.status_code != 200:
-            return None
+            return {"error": f"Site returned status: {r.status_code}"}
             
         soup = BeautifulSoup(r.text, 'html.parser')
-        
         table = soup.find('table')
+        
         if not table:
-            return None
+            return {"error": "No table found on page."}
 
         for row in table.find_all('tr'):
             cells = row.find_all(['td', 'th'])
             if len(cells) < 5:
                 continue
             
-            loc_name = cells[0].get_text(strip=True).lower()
+            # Clean text: remove non-breaking spaces and extra whitespace
+            loc_name = cells[0].get_text(" ", strip=True).lower().replace('\xa0', ' ')
             
-            # Fuzzy match for "Front Lead"
+            # Look for "Front" and "Lead" anywhere in the first cell
             if "front" in loc_name and "lead" in loc_name:
-                cols = [c.get_text(strip=True) for c in cells]
+                cols = [c.get_text(strip=True).replace('\xa0', '') for c in cells]
                 return {
                     "time": cols[1],
                     "dir": cols[2],
                     "mean": cols[3],
                     "gust": cols[4]
                 }
+                
+        return {"error": "Front Lead row not found in table."}
+
     except Exception as e:
-        # This will only show in the logs, won't crash the app
-        print(f"Scraper Error: {e}")
-        return None
-    return None
+        return {"error": str(e)}
 
 # --- STYLING (CSS) ---
 st.markdown("""
@@ -72,7 +74,6 @@ st.markdown("""
             font-weight: 700;
             color: #ffffff;
             margin-bottom: 0.5rem;
-            white-space: nowrap;
         }
         .live-container {
             background: rgba(0, 0, 0, 0.3);
@@ -81,34 +82,10 @@ st.markdown("""
             margin-bottom: 1rem;
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        .live-label {
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            opacity: 0.7;
-            letter-spacing: 0.5px;
-            margin-bottom: 2px;
-        }
-        .live-val {
-            font-size: 1.2rem;
-            font-weight: 800;
-            color: #ffffff;
-        }
-        .live-unit {
-            font-size: 0.7rem;
-            font-weight: 400;
-            opacity: 0.8;
-            margin-left: 2px;
-        }
-        .section-label {
-            opacity: 0.5;
-            font-size: 0.7rem;
-            font-weight: 700;
-            margin-top: 1.5rem;
-            margin-bottom: 0.2rem;
-            text-align: left;
-            padding-left: 5px;
-            text-transform: uppercase;
-        }
+        .live-label { font-size: 0.65rem; text-transform: uppercase; opacity: 0.7; letter-spacing: 0.5px; margin-bottom: 2px; }
+        .live-val { font-size: 1.2rem; font-weight: 800; color: #ffffff; }
+        .live-unit { font-size: 0.7rem; opacity: 0.8; margin-left: 2px; }
+        .section-label { opacity: 0.5; font-size: 0.7rem; font-weight: 700; margin-top: 1.5rem; text-transform: uppercase; padding-left: 5px; }
     </style>
     <div class="custom-title">Harbour Front Lead</div>
 """, unsafe_allow_html=True)
@@ -134,11 +111,9 @@ def get_weather_data():
         t = pd.to_datetime(f["datetime"])
         if t.tzinfo is not None:
             t = t.tz_convert("Pacific/Auckland").tz_localize(None)
-        speed_kmh = f.get("wind_speed_mean", f.get("wind_speed", 0))
-        speed_kts = speed_kmh * KMH_TO_KNOTS
+        speed_kts = f.get("wind_speed_mean", f.get("wind_speed", 0)) * KMH_TO_KNOTS
         records.append({"time": t, "speed": speed_kts, "dir": f.get("wind_direction", 0)})
-    df = pd.DataFrame(records)
-
+    
     sun_url = "https://api.open-meteo.com/v1/forecast"
     sun_params = {"latitude": LAT, "longitude": LON, "daily": ["sunrise", "sunset"], "timezone": "Pacific/Auckland", "forecast_days": 14}
     r_sun = requests.get(sun_url, params=sun_params).json()
@@ -147,13 +122,12 @@ def get_weather_data():
         "sunrise": pd.to_datetime(r_sun["daily"]["sunrise"]),
         "sunset": pd.to_datetime(r_sun["daily"]["sunset"])
     })
-    return df, sun
+    return pd.DataFrame(records), sun
 
 def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
     if df_hourly.empty: return
     max_wind = df_hourly['speed'].max()
-    crop_start = pd.Timestamp(df_sun['sunrise'].min())
-    crop_end = pd.Timestamp(df_sun['sunset'].max())
+    crop_start, crop_end = pd.Timestamp(df_sun['sunrise'].min()), pd.Timestamp(df_sun['sunset'].max())
 
     segments = []
     for _, day in df_sun.iterrows():
@@ -161,8 +135,7 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
         seg_dur = (sunset - sunrise) / 3
         for i in range(3):
             t0, t1 = sunrise + (i*seg_dur), sunrise + ((i+1)*seg_dur)
-            mask = (df_hourly['time'] >= t0) & (df_hourly['time'] < t1)
-            d = df_hourly[mask]
+            d = df_hourly[(df_hourly['time'] >= t0) & (df_hourly['time'] < t1)]
             if not d.empty:
                 rads = np.deg2rad(d['dir'])
                 avg_dir = np.rad2deg(np.arctan2(np.sin(rads).mean(), np.cos(rads).mean())) % 360
@@ -172,76 +145,26 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
     fig_ribbon = go.Figure()
     for s in segments:
         if "spacer" in s:
-            fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color="rgba(0,0,0,0)", line_width=0), showlegend=False))
+            fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color="rgba(0,0,0,0)"), showlegend=False))
             continue
-        val = s['speed']
-        fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color=get_color(val), line_width=0), showlegend=False))
-        heading = (s['dir'] + 180) % 360
-        y_arrow = 0.5 + (0.3 * np.cos(np.deg2rad(s['dir'])))
-        fig_ribbon.add_annotation(x=s['x_id'], y=y_arrow, text="➤", showarrow=False, textangle=heading-90, font=dict(size=7, color="white"))
-        fig_ribbon.add_annotation(x=s['x_id'], y=-0.3, text=f"<b>{int(round(val))}</b>", showarrow=False, font=dict(size=7, color="white"))
+        fig_ribbon.add_trace(go.Bar(x=[s['x_id']], y=[1], marker=dict(color=get_color(s['speed'])), showlegend=False))
+        fig_ribbon.add_annotation(x=s['x_id'], y=0.5, text="➤", textangle=((s['dir']+180)%360)-90, showarrow=False, font=dict(size=7, color="white"))
+        fig_ribbon.add_annotation(x=s['x_id'], y=-0.3, text=f"<b>{int(round(s['speed']))}</b>", showarrow=False, font=dict(size=7, color="white"))
 
-    fig_ribbon.update_layout(
-        height=85, margin=dict(l=5, r=5, t=25, b=10), template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', bargap=0,
-        xaxis=dict(showgrid=False, tickmode='array', tickvals=[f"{d}_1" for d in df_sun['date']], 
-                   ticktext=[f"<b>{d.strftime('%a')}</b>" for d in df_sun['date']], side="top", tickfont=dict(size=9, color="white"), fixedrange=True),
-        yaxis=dict(visible=False, range=[-0.6, 1.1], fixedrange=True)
-    )
+    fig_ribbon.update_layout(height=85, margin=dict(l=5, r=5, t=25, b=10), template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', bargap=0, xaxis=dict(showgrid=False, tickmode='array', tickvals=[f"{d}_1" for d in df_sun['date']], ticktext=[f"<b>{d.strftime('%a')}</b>" for d in df_sun['date']], side="top", tickfont=dict(size=9)), yaxis=dict(visible=False, range=[-0.6, 1.1]))
     st.plotly_chart(fig_ribbon, use_container_width=True, config={'displayModeBar': False})
 
     fig_main = go.Figure()
-    now_speed = None
+    # Simplified drawing for reliability
     for i in range(len(df_hourly)-1):
         p1, p2 = df_hourly.iloc[i], df_hourly.iloc[i+1]
-        day_info_match = df_sun[df_sun['date'] == p1['time'].date()]
-        if day_info_match.empty: continue
-        day_info = day_info_match.iloc[0]
-        sr, ss = pd.Timestamp(day_info['sunrise']), pd.Timestamp(day_info['sunset'])
-        transition_points = sorted([t for t in [sr, ss] if p1['time'] < t < p2['time']])
-        current_times = [p1['time']] + transition_points + [p2['time']]
-        for j in range(len(current_times)-1):
-            t_start, t_end = current_times[j], current_times[j+1]
-            if t_end < crop_start or t_start > crop_end: continue
-            duration = (p2['time'] - p1['time']).total_seconds()
-            frac = (t_start - p1['time']).total_seconds() / duration if duration > 0 else 0
-            interp_speed = p1['speed'] + frac * (p2['speed'] - p1['speed'])
-            if show_now_line and t_start <= now_ts < t_end:
-                seg_duration = (t_end - t_start).total_seconds()
-                now_frac = (now_ts - t_start).total_seconds() / seg_duration if seg_duration > 0 else 0
-                speed_end_seg = interp_speed + (p2['speed']-p1['speed']) * (seg_duration / duration) if duration > 0 else interp_speed
-                now_speed = interp_speed + now_frac * (speed_end_seg - interp_speed)
-            is_night = t_start < sr or t_start >= ss
-            alpha = 0.12 if is_night else 1.0
-            seg_duration = (t_end - t_start).total_seconds()
-            speed_end = interp_speed + (p2['speed']-p1['speed']) * (seg_duration / duration) if duration > 0 else interp_speed
-            fig_main.add_trace(go.Scatter(x=[t_start, t_end], y=[interp_speed, speed_end], line=dict(color=get_color(interp_speed, alpha), width=2 if not is_night else 1), mode='lines', showlegend=False, hoverinfo='skip'))
+        fig_main.add_trace(go.Scatter(x=[p1['time'], p2['time']], y=[p1['speed'], p2['speed']], line=dict(color=get_color(p1['speed']), width=2), mode='lines', showlegend=False))
 
     if show_now_line and now_ts:
-        fig_main.add_vline(x=now_ts, line_width=1, line_dash="dash", line_color="white", opacity=0.6)
-        if now_speed is not None:
-            fig_main.add_annotation(x=now_ts, y=now_speed, text=f"<b>{int(round(now_speed))}</b>", showarrow=False, xanchor="left", xshift=5, font=dict(size=11, color=get_color(now_speed)), bgcolor="rgba(61, 90, 115, 0.6)")
+        fig_main.add_vline(x=now_ts, line_width=1, line_dash="dash", line_color="white")
 
-    for _, day_sun in df_sun.iterrows():
-        sr, ss = pd.Timestamp(day_sun['sunrise']), pd.Timestamp(day_sun['sunset'])
-        midpoint = sr + (ss - sr) / 2
-        fig_main.add_annotation(x=midpoint, y=max_wind + 6, text=f"<b>{day_sun['date'].strftime('%a')}</b>", showarrow=False, font=dict(size=9, color="rgba(255,255,255,0.6)"))
-        day_mask = (df_hourly['time'] >= sr) & (df_hourly['time'] <= ss)
-        day_data = df_hourly[day_mask]
-        if not day_data.empty:
-            for func, offset in [(day_data.loc[day_data['speed'].idxmax()], 3.5), (day_data.loc[day_data['speed'].idxmin()], -3.5)]:
-                heading = (func['dir'] + 180) % 360
-                fig_main.add_annotation(x=func['time'], y=func['speed'] + (offset/2.5), text="➤", textangle=heading-90, showarrow=False, font=dict(size=6, color="white"))
-                fig_main.add_annotation(x=func['time'], y=func['speed'] + offset, text=f"<b>{int(round(func['speed']))}</b>", showarrow=False, font=dict(size=8, color="white"))
-
-    for i in range(len(df_sun)-1):
-        ss = pd.Timestamp(df_sun.iloc[i]['sunset'])
-        sr_next = pd.Timestamp(df_sun.iloc[i+1]['sunrise'])
-        fig_main.add_vrect(x0=ss, x1=sr_next, fillcolor="rgba(0,0,0,0.2)", layer="below", line_width=0)
-        night_midpoint = ss + (sr_next - ss) / 2
-        fig_main.add_annotation(x=night_midpoint, y=-2.5, text="☾", showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.35)"))
-
-    fig_main.update_layout(height=200, margin=dict(l=10, r=10, t=5, b=5), template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(visible=False, fixedrange=False, range=[crop_start, crop_end]), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.03)', zeroline=False, fixedrange=True, showticklabels=False, range=[-5, max_wind + 10]))
-    st.plotly_chart(fig_main, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': True})
+    fig_main.update_layout(height=200, margin=dict(l=10, r=10, t=5, b=5), template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(visible=False, range=[crop_start, crop_end]), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', showticklabels=False, range=[-5, max_wind + 10]))
+    st.plotly_chart(fig_main, use_container_width=True, config={'displayModeBar': False})
 
 # --- EXECUTION ---
 
@@ -249,53 +172,32 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
 live_data = get_front_lead_live()
 
 # 2. Render Live Report Banner
-if live_data:
+if live_data and "error" not in live_data:
     st.markdown(f"""
     <div class="live-container">
         <div style="display: flex; justify-content: space-around; text-align: center;">
-            <div>
-                <div class="live-label">Current</div>
-                <div class="live-val">{live_data['mean']}<span class="live-unit">kts</span></div>
-            </div>
-            <div>
-                <div class="live-label">Max Gust</div>
-                <div class="live-val" style="color: #ff7e79;">{live_data['gust']}<span class="live-unit">kts</span></div>
-            </div>
-            <div>
-                <div class="live-label">Direction</div>
-                <div class="live-val">{live_data['dir']}</div>
-            </div>
+            <div><div class="live-label">Current</div><div class="live-val">{live_data['mean']}<span class="live-unit">kts</span></div></div>
+            <div><div class="live-label">Max Gust</div><div class="live-val" style="color: #ff7e79;">{live_data['gust']}<span class="live-unit">kts</span></div></div>
+            <div><div class="live-label">Direction</div><div class="live-val">{live_data['dir']}</div></div>
             <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 15px;">
-                <div class="live-label">Updated</div>
-                <div class="live-val" style="font-size: 0.8rem; opacity: 0.6; padding-top: 5px;">{live_data['time']}</div>
+                <div class="live-label">Updated</div><div class="live-val" style="font-size: 0.8rem; opacity: 0.6;">{live_data['time']}</div>
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 else:
+    # This shows the error if the scraper fails
+    st.sidebar.error(f"Live Scraper Debug: {live_data.get('error') if live_data else 'Unknown Error'}")
     st.info("Live Front Lead data currently unavailable.")
 
-# 3. Render Forecast Graphs
+# 3. Render Forecast
 try:
     df_all, sun_all = get_weather_data()
     now_nz = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=12))).replace(tzinfo=None)
-
+    
     # Week 1
     s1 = sun_all.iloc[:7]
-    label_1 = f"{s1.iloc[0]['date'].strftime('%b %d')} - {s1.iloc[-1]['date'].strftime('%d')}"
-    st.markdown(f'<div class="section-label">{label_1}</div>', unsafe_allow_html=True)
-    mask1 = (df_all['time'] >= pd.Timestamp(s1.iloc[0]['date'])) & (df_all['time'] < pd.Timestamp(s1.iloc[-1]['date']) + pd.Timedelta(days=1))
-    render_forecast_block(df_all[mask1], s1, show_now_line=True, now_ts=now_nz)
-
-    st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 1rem 0;'>", unsafe_allow_html=True)
-
-    # Week 2
-    s2 = sun_all.iloc[7:14]
-    if not s2.empty:
-        label_2 = f"{s2.iloc[0]['date'].strftime('%b %d')} - {s2.iloc[-1]['date'].strftime('%d')}"
-        st.markdown(f'<div class="section-label">{label_2}</div>', unsafe_allow_html=True)
-        mask2 = (df_all['time'] >= pd.Timestamp(s2.iloc[0]['date'])) & (df_all['time'] < pd.Timestamp(s2.iloc[-1]['date']) + pd.Timedelta(days=1))
-        render_forecast_block(df_all[mask2], s2)
-
+    st.markdown(f'<div class="section-label">Forecast: {s1.iloc[0]["date"].strftime("%b %d")}</div>', unsafe_allow_html=True)
+    render_forecast_block(df_all, s1, show_now_line=True, now_ts=now_nz)
 except Exception as e:
-    st.error(f"Error fetching forecast: {e}")
+    st.error(f"Forecast error: {e}")
