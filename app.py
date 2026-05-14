@@ -4,11 +4,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import datetime
 import numpy as np
+from bs4 import BeautifulSoup
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Wellington Harbour Wind (Kts)", layout="wide")
 
-# --- CSS: MOBILE OPTIMIZATION ---
+# --- CSS: MOBILE OPTIMIZATION & LIVE BOX ---
 st.markdown("""
     <style>
         [data-testid="stHeader"], header { visibility: hidden; height: 0; }
@@ -24,8 +25,34 @@ st.markdown("""
             font-size: 1.3rem;
             font-weight: 700;
             color: #ffffff;
-            margin-bottom: 0.3rem;
+            margin-bottom: 0.5rem;
             white-space: nowrap;
+        }
+        /* Live Report Styling */
+        .live-container {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .live-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            opacity: 0.7;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+        .live-val {
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: #ffffff;
+        }
+        .live-unit {
+            font-size: 0.7rem;
+            font-weight: 400;
+            opacity: 0.8;
+            margin-left: 2px;
         }
         .section-label {
             opacity: 0.5;
@@ -38,23 +65,44 @@ st.markdown("""
             text-transform: uppercase;
         }
     </style>
-    <div class="custom-title">Harbour Front Lead (NIWA - Knots)</div>
+    <div class="custom-title">Harbour Front Lead</div>
 """, unsafe_allow_html=True)
 
-# --- SETTINGS ---
+# --- SETTINGS & CONSTANTS ---
 LAT, LON = -41.319, 174.839
-# UPDATED: Conversion factor from km/h to knots (1 / 1.852)
 KMH_TO_KNOTS = 0.539957
 
+# --- LIVE SCRAPER ---
+@st.cache_data(ttl=120) # Refresh live data every 2 minutes
+def get_front_lead_live():
+    try:
+        url = "https://www.centreport.co.nz/images/forms/PortWeather.html"
+        r = requests.get(url, timeout=10)
+        soup = BeautifulSoup(r.text, 'lxml')
+        table = soup.find('table')
+        
+        for row in table.find_all('tr'):
+            cols = [ele.text.strip() for ele in row.find_all('td')]
+            if len(cols) > 0 and "Front Lead" in cols[0]:
+                # PortWeather.html format: [Location, Time, Direction, Mean, Max]
+                return {
+                    "time": cols[1],
+                    "dir": cols[2],
+                    "mean": cols[3],
+                    "gust": cols[4]
+                }
+    except:
+        return None
+    return None
+
 def get_color(val, alpha=1.0):
-    # Colors adjusted for knot ranges
-    if val <= 10: return f"rgba(169, 201, 217, {alpha})"    # 0-10 kts
-    if val <= 15: return f"rgba(92, 169, 204, {alpha})"    # 11-15 kts
-    if val <= 20: return f"rgba(122, 214, 134, {alpha})"   # 16-20 kts
-    if val <= 25: return f"rgba(255, 230, 109, {alpha})"   # 21-25 kts
-    if val <= 30: return f"rgba(255, 126, 121, {alpha})"   # 26-30 kts
-    if val <= 35: return f"rgba(224, 49, 49, {alpha})"     # 31-35 kts
-    return f"rgba(153, 5, 5, {alpha})"                     # 36+ kts
+    if val <= 10: return f"rgba(169, 201, 217, {alpha})"
+    if val <= 15: return f"rgba(92, 169, 204, {alpha})"
+    if val <= 20: return f"rgba(122, 214, 134, {alpha})"
+    if val <= 25: return f"rgba(255, 230, 109, {alpha})"
+    if val <= 30: return f"rgba(255, 126, 121, {alpha})"
+    if val <= 35: return f"rgba(224, 49, 49, {alpha})"
+    return f"rgba(153, 5, 5, {alpha})"
 
 @st.cache_data(ttl=600)
 def get_weather_data():
@@ -67,29 +115,19 @@ def get_weather_data():
         t = pd.to_datetime(f["datetime"])
         if t.tzinfo is not None:
             t = t.tz_convert("Pacific/Auckland").tz_localize(None)
-        
-        # Get raw speed (now assumed km/h) and convert to knots
         speed_kmh = f.get("wind_speed_mean", f.get("wind_speed", 0))
         speed_kts = speed_kmh * KMH_TO_KNOTS
-        
-        records.append({
-            "time": t, "speed": speed_kts, "dir": f.get("wind_direction", 0)
-        })
+        records.append({"time": t, "speed": speed_kts, "dir": f.get("wind_direction", 0)})
     df = pd.DataFrame(records)
 
     sun_url = "https://api.open-meteo.com/v1/forecast"
-    sun_params = {
-        "latitude": LAT, "longitude": LON,
-        "daily": ["sunrise", "sunset"],
-        "timezone": "Pacific/Auckland", "forecast_days": 14
-    }
+    sun_params = {"latitude": LAT, "longitude": LON, "daily": ["sunrise", "sunset"], "timezone": "Pacific/Auckland", "forecast_days": 14}
     r_sun = requests.get(sun_url, params=sun_params).json()
     sun = pd.DataFrame({
         "date": pd.to_datetime(r_sun["daily"]["time"]).date,
         "sunrise": pd.to_datetime(r_sun["daily"]["sunrise"]),
         "sunset": pd.to_datetime(r_sun["daily"]["sunset"])
     })
-    
     return df, sun
 
 def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
@@ -136,61 +174,40 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
     # --- 2. COMPACT WIND DASHBOARD ---
     fig_main = go.Figure()
     now_speed = None
-
     for i in range(len(df_hourly)-1):
         p1, p2 = df_hourly.iloc[i], df_hourly.iloc[i+1]
         day_info_match = df_sun[df_sun['date'] == p1['time'].date()]
         if day_info_match.empty: continue
         day_info = day_info_match.iloc[0]
-        
         sr, ss = pd.Timestamp(day_info['sunrise']), pd.Timestamp(day_info['sunset'])
         transition_points = sorted([t for t in [sr, ss] if p1['time'] < t < p2['time']])
         current_times = [p1['time']] + transition_points + [p2['time']]
-        
         for j in range(len(current_times)-1):
             t_start, t_end = current_times[j], current_times[j+1]
             if t_end < crop_start or t_start > crop_end: continue
-            
             duration = (p2['time'] - p1['time']).total_seconds()
             frac = (t_start - p1['time']).total_seconds() / duration if duration > 0 else 0
             interp_speed = p1['speed'] + frac * (p2['speed'] - p1['speed'])
-
             if show_now_line and t_start <= now_ts < t_end:
                 seg_duration = (t_end - t_start).total_seconds()
                 now_frac = (now_ts - t_start).total_seconds() / seg_duration if seg_duration > 0 else 0
                 speed_end_seg = interp_speed + (p2['speed']-p1['speed']) * (seg_duration / duration) if duration > 0 else interp_speed
                 now_speed = interp_speed + now_frac * (speed_end_seg - interp_speed)
-            
             is_night = t_start < sr or t_start >= ss
             alpha = 0.12 if is_night else 1.0
-            
             seg_duration = (t_end - t_start).total_seconds()
             speed_end = interp_speed + (p2['speed']-p1['speed']) * (seg_duration / duration) if duration > 0 else interp_speed
-
-            fig_main.add_trace(go.Scatter(
-                x=[t_start, t_end], y=[interp_speed, speed_end],
-                line=dict(color=get_color(interp_speed, alpha), width=2 if not is_night else 1),
-                mode='lines', showlegend=False, hoverinfo='skip'
-            ))
+            fig_main.add_trace(go.Scatter(x=[t_start, t_end], y=[interp_speed, speed_end], line=dict(color=get_color(interp_speed, alpha), width=2 if not is_night else 1), mode='lines', showlegend=False, hoverinfo='skip'))
 
     if show_now_line and now_ts:
         fig_main.add_vline(x=now_ts, line_width=1, line_dash="dash", line_color="white", opacity=0.6)
         if now_speed is not None:
-            fig_main.add_annotation(
-                x=now_ts, y=now_speed,
-                text=f"<b>{int(round(now_speed))}</b>",
-                showarrow=False,
-                xanchor="left",
-                xshift=5,
-                font=dict(size=11, color=get_color(now_speed)),
-                bgcolor="rgba(61, 90, 115, 0.6)"
-            )
+            fig_main.add_annotation(x=now_ts, y=now_speed, text=f"<b>{int(round(now_speed))}</b>", showarrow=False, xanchor="left", xshift=5, font=dict(size=11, color=get_color(now_speed)), bgcolor="rgba(61, 90, 115, 0.6)")
 
     for _, day_sun in df_sun.iterrows():
         sr, ss = pd.Timestamp(day_sun['sunrise']), pd.Timestamp(day_sun['sunset'])
         midpoint = sr + (ss - sr) / 2
         fig_main.add_annotation(x=midpoint, y=max_wind + 6, text=f"<b>{day_sun['date'].strftime('%a')}</b>", showarrow=False, font=dict(size=9, color="rgba(255,255,255,0.6)"))
-        
         day_mask = (df_hourly['time'] >= sr) & (df_hourly['time'] <= ss)
         day_data = df_hourly[day_mask]
         if not day_data.empty:
@@ -206,14 +223,40 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
         night_midpoint = ss + (sr_next - ss) / 2
         fig_main.add_annotation(x=night_midpoint, y=-2.5, text="☾", showarrow=False, font=dict(size=12, color="rgba(255,255,255,0.35)"))
 
-    fig_main.update_layout(
-        height=200, margin=dict(l=10, r=10, t=5, b=5), template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(visible=False, fixedrange=False, range=[crop_start, crop_end]), 
-        yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.03)', zeroline=False, fixedrange=True, showticklabels=False, range=[-5, max_wind + 10])
-    )
+    fig_main.update_layout(height=200, margin=dict(l=10, r=10, t=5, b=5), template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(visible=False, fixedrange=False, range=[crop_start, crop_end]), yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.03)', zeroline=False, fixedrange=True, showticklabels=False, range=[-5, max_wind + 10]))
     st.plotly_chart(fig_main, use_container_width=True, config={'displayModeBar': False, 'scrollZoom': True})
 
 # --- EXECUTION ---
+
+# 1. Fetch Live Report
+live_data = get_front_lead_live()
+
+# 2. Render Live Report Banner
+if live_data:
+    st.markdown(f"""
+    <div class="live-container">
+        <div style="display: flex; justify-content: space-around; text-align: center;">
+            <div>
+                <div class="live-label">Current</div>
+                <div class="live-val">{live_data['mean']}<span class="live-unit">kts</span></div>
+            </div>
+            <div>
+                <div class="live-label">Max Gust</div>
+                <div class="live-val" style="color: #ff7e79;">{live_data['gust']}<span class="live-unit">kts</span></div>
+            </div>
+            <div>
+                <div class="live-label">Direction</div>
+                <div class="live-val">{live_data['dir']}</div>
+            </div>
+            <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 15px;">
+                <div class="live-label">Updated</div>
+                <div class="live-val" style="font-size: 0.8rem; opacity: 0.6; padding-top: 5px;">{live_data['time']}</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# 3. Render Forecast Graphs
 try:
     df_all, sun_all = get_weather_data()
     now_nz = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=12))).replace(tzinfo=None)
