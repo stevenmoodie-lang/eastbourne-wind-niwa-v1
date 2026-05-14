@@ -5,6 +5,10 @@ import plotly.graph_objects as go
 import datetime
 import numpy as np
 from bs4 import BeautifulSoup
+import urllib3
+
+# Suppress SSL warnings if they occur during the scrape
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Wellington Harbour Wind (Kts)", layout="wide")
@@ -71,37 +75,42 @@ st.markdown("""
 LAT, LON = -41.319, 174.839
 KMH_TO_KNOTS = 0.539957
 
-# --- LIVE SCRAPER (ROBUST VERSION) ---
-@st.cache_data(ttl=120) 
+# --- LIVE SCRAPER (ENHANCED RESILIENCE) ---
+@st.cache_data(ttl=60) # Reduced TTL to ensure fresh data while debugging
 def get_front_lead_live():
     try:
-        # Using the official CentrePort URL which is more stable than the NDBC domain
         url = "https://www.centreport.co.nz/images/forms/PortWeather.html"
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://www.centreport.co.nz/'
         }
-        r = requests.get(url, headers=headers, timeout=10)
-        r.encoding = 'utf-8' # Ensure correct character encoding
+        # Added verify=False to bypass common SSL issues on NZ gov/port sites
+        r = requests.get(url, headers=headers, timeout=15, verify=False)
+        r.encoding = 'utf-8'
         
-        # Use html.parser as it's built-in to Python (doesn't require lxml)
         soup = BeautifulSoup(r.text, 'html.parser')
-        table = soup.find('table')
+        rows = soup.find_all('tr')
         
-        if table:
-            for row in table.find_all('tr'):
-                # Clean up the text: remove non-breaking spaces and whitespace
-                cols = [ele.text.replace('\xa0', ' ').strip() for ele in row.find_all(['td', 'th'])]
-                
-                # Check for "Front Lead" (case insensitive and fuzzy)
-                if len(cols) > 4 and "front" in cols[0].lower() and "lead" in cols[0].lower():
+        for row in rows:
+            cells = row.find_all(['td', 'th'])
+            # Clean all cells in the row
+            cols = [c.get_text(strip=True).replace('\xa0', ' ') for c in cells]
+            
+            if len(cols) >= 5:
+                # Search for "front" and "lead" anywhere in the first two columns
+                combined_name = (cols[0] + cols[1]).lower()
+                if "front" in combined_name and "lead" in combined_name:
+                    # Depending on the table version, Front Lead might be in Col 0 or Col 1
+                    # We look for the first column that looks like a time (contains :) 
+                    # and assume the next 3 are Dir, Mean, Gust
+                    time_idx = 1 if ":" in cols[1] else 2
                     return {
-                        "time": cols[1],
-                        "dir": cols[2],
-                        "mean": cols[3],
-                        "gust": cols[4]
+                        "time": cols[time_idx],
+                        "dir": cols[time_idx + 1],
+                        "mean": cols[time_idx + 2],
+                        "gust": cols[time_idx + 3]
                     }
-    except Exception as e:
-        # Return none to trigger the "unavailable" message in the UI
+    except Exception:
         return None
     return None
 
