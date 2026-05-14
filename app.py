@@ -43,8 +43,8 @@ st.markdown("""
 
 # --- SETTINGS ---
 LAT, LON = -41.319, 174.839
-# Conversion factor from m/s to knots
-MS_TO_KNOTS = 1.94384
+# UPDATED: Conversion factor from km/h to knots (1 / 1.852)
+KMH_TO_KNOTS = 0.539957
 
 def get_color(val, alpha=1.0):
     # Colors adjusted for knot ranges
@@ -68,9 +68,9 @@ def get_weather_data():
         if t.tzinfo is not None:
             t = t.tz_convert("Pacific/Auckland").tz_localize(None)
         
-        # Get raw speed (m/s) and convert to knots
-        speed_ms = f.get("wind_speed_mean", f.get("wind_speed", 0))
-        speed_kts = speed_ms * MS_TO_KNOTS
+        # Get raw speed (now assumed km/h) and convert to knots
+        speed_kmh = f.get("wind_speed_mean", f.get("wind_speed", 0))
+        speed_kts = speed_kmh * KMH_TO_KNOTS
         
         records.append({
             "time": t, "speed": speed_kts, "dir": f.get("wind_direction", 0)
