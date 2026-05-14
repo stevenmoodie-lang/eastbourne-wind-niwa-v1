@@ -42,7 +42,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- SETTINGS ---
-# Updated coordinates for Wellington Harbour entrance area
 LAT, LON = -41.275, 174.825 
 KMH_TO_KNOTS = 0.539957
 
@@ -65,40 +64,41 @@ def get_weather_data():
         "daily": ["sunrise", "sunset"],
         "timezone": "Pacific/Auckland", "wind_speed_unit": "kn", "forecast_days": 14
     }
-    r_om = requests.get(om_url, params=om_params, timeout=10).json()
+    r_om = requests.get(om_url, params=om_params, timeout=10)
+    r_om.raise_for_status()
+    r_om_json = r_om.json()
     
     df_om = pd.DataFrame({
-        "time": pd.to_datetime(r_om["hourly"]["time"]),
-        "speed": r_om["hourly"]["wind_speed_10m"],
-        "dir": r_om["hourly"]["wind_direction_10m"]
+        "time": pd.to_datetime(r_om_json["hourly"]["time"]),
+        "speed": r_om_json["hourly"]["wind_speed_10m"],
+        "dir": r_om_json["hourly"]["wind_direction_10m"]
     })
     
-    # 2. Try to fetch NIWA for the first 7 days
-    try:
-        niwa_url = "https://weather-api-azure.niwa.co.nz/api/grid/combined"
-        niwa_params = {"lat": LAT, "long": LON}
-        r_niwa = requests.get(niwa_url, params=niwa_params, timeout=10).json()
-        
-        niwa_records = []
-        for f in r_niwa.get("forecast", []):
-            t = pd.to_datetime(f["datetime"])
-            speed_kts = f.get("wind_speed_mean", f.get("wind_speed", 0)) * KMH_TO_KNOTS
-            niwa_records.append({"time": t, "speed": speed_kts, "dir": f.get("wind_direction", 0)})
-        
-        df_niwa = pd.DataFrame(niwa_records)
-        limit_date = df_om['time'].min() + pd.Timedelta(days=7)
-        df_niwa = df_niwa[df_niwa['time'] < limit_date]
-        
-        # Merge: NIWA (days 1-7) + Open-Meteo (days 8-14)
-        df_final = pd.concat([df_niwa, df_om[df_om['time'] >= limit_date]]).reset_index(drop=True)
-        
-    except Exception:
-        df_final = df_om
-
+    # 2. Fetch NIWA (No fallback: will raise error on failure)
+    niwa_url = "https://weather-api-azure.niwa.co.nz/api/grid/combined"
+    niwa_params = {"lat": LAT, "long": LON}
+    
+    response = requests.get(niwa_url, params=niwa_params, timeout=10)
+    response.raise_for_status() # Raises HTTPError if status != 200
+    r_niwa = response.json()
+    
+    niwa_records = []
+    for f in r_niwa.get("forecast", []):
+        t = pd.to_datetime(f["datetime"])
+        speed_kts = f.get("wind_speed_mean", f.get("wind_speed", 0)) * KMH_TO_KNOTS
+        niwa_records.append({"time": t, "speed": speed_kts, "dir": f.get("wind_direction", 0)})
+    
+    df_niwa = pd.DataFrame(niwa_records)
+    limit_date = df_om['time'].min() + pd.Timedelta(days=7)
+    df_niwa = df_niwa[df_niwa['time'] < limit_date]
+    
+    # Merge: NIWA (days 1-7) + Open-Meteo (days 8-14)
+    df_final = pd.concat([df_niwa, df_om[df_om['time'] >= limit_date]]).reset_index(drop=True)
+    
     sun = pd.DataFrame({
-        "date": pd.to_datetime(r_om["daily"]["time"]).date,
-        "sunrise": pd.to_datetime(r_om["daily"]["sunrise"]),
-        "sunset": pd.to_datetime(r_om["daily"]["sunset"])
+        "date": pd.to_datetime(r_om_json["daily"]["time"]).date,
+        "sunrise": pd.to_datetime(r_om_json["daily"]["sunrise"]),
+        "sunset": pd.to_datetime(r_om_json["daily"]["sunset"])
     })
     
     return df_final, sun
