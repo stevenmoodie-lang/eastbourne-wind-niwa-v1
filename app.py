@@ -6,7 +6,7 @@ import datetime
 import numpy as np
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Eastbourne Wind NIWA", layout="wide")
+st.set_page_config(page_title="Wellington Harbour Wind NIWA", layout="wide")
 
 # --- CSS: MOBILE OPTIMIZATION ---
 st.markdown("""
@@ -38,11 +38,12 @@ st.markdown("""
             text-transform: uppercase;
         }
     </style>
-    <div class="custom-title">Eastbourne Wind (NIWA)</div>
+    <div class="custom-title">Harbour Front Lead (NIWA)</div>
 """, unsafe_allow_html=True)
 
 # --- SETTINGS ---
-LAT, LON = -41.290, 174.900
+# Updated to Front Lead coordinates
+LAT, LON = -41.319, 174.839
 
 def get_color(val, alpha=1.0):
     if val <= 5: return f"rgba(169, 201, 217, {alpha})"     # 0-5
