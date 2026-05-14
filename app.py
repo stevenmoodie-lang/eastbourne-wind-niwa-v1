@@ -4,7 +4,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import datetime
 import numpy as np
-from bs4 import BeautifulSoup
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Wellington Harbour Wind (Kts)", layout="wide")
@@ -13,49 +12,39 @@ st.set_page_config(page_title="Wellington Harbour Wind (Kts)", layout="wide")
 LAT, LON = -41.319, 174.839
 KMH_TO_KNOTS = 0.539957
 
-# --- LIVE SCRAPER ---
+# --- LIVE DATA (CENTREPORT API) ---
 @st.cache_data(ttl=60)
 def get_front_lead_live():
+    """Fetches live data directly from CentrePort's weather API."""
     try:
-        url = "https://ndbc.co.nz/centreport/weather.php" 
-        # A very standard browser header
+        # This is the direct source for the tables you see on NDBC and CentrePort sites
+        url = "https://weather.centreport.co.nz/Home/GetTableData"
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+            'Referer': 'https://weather.centreport.co.nz/'
         }
         
-        r = requests.get(url, headers=headers, timeout=15)
+        r = requests.get(url, headers=headers, timeout=10)
         if r.status_code != 200:
-            return {"error": f"Site returned status: {r.status_code}"}
+            return {"error": f"API Error: {r.status_code}"}
             
-        soup = BeautifulSoup(r.text, 'html.parser')
-        table = soup.find('table')
+        data = r.json()
         
-        if not table:
-            return {"error": "No table found on page."}
-
-        for row in table.find_all('tr'):
-            cells = row.find_all(['td', 'th'])
-            if len(cells) < 5:
-                continue
-            
-            # Clean text: remove non-breaking spaces and extra whitespace
-            loc_name = cells[0].get_text(" ", strip=True).lower().replace('\xa0', ' ')
-            
-            # Look for "Front" and "Lead" anywhere in the first cell
-            if "front" in loc_name and "lead" in loc_name:
-                cols = [c.get_text(strip=True).replace('\xa0', '') for c in cells]
+        # Search for Front Lead in the list of stations
+        for station in data:
+            name = station.get("StationName", "").lower()
+            if "front" in name and "lead" in name:
                 return {
-                    "time": cols[1],
-                    "dir": cols[2],
-                    "mean": cols[3],
-                    "gust": cols[4]
+                    "time": station.get("Time", "N/A"),
+                    "dir": station.get("WindDir", "N/A"),
+                    "mean": station.get("WindSpeed", 0),
+                    "gust": station.get("WindGust", 0)
                 }
                 
-        return {"error": "Front Lead row not found in table."}
+        return {"error": "Station 'Front Lead' not found in API response."}
 
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Connection Error: {str(e)}"}
 
 # --- STYLING (CSS) ---
 st.markdown("""
@@ -155,7 +144,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
     st.plotly_chart(fig_ribbon, use_container_width=True, config={'displayModeBar': False})
 
     fig_main = go.Figure()
-    # Simplified drawing for reliability
     for i in range(len(df_hourly)-1):
         p1, p2 = df_hourly.iloc[i], df_hourly.iloc[i+1]
         fig_main.add_trace(go.Scatter(x=[p1['time'], p2['time']], y=[p1['speed'], p2['speed']], line=dict(color=get_color(p1['speed']), width=2), mode='lines', showlegend=False))
@@ -186,7 +174,6 @@ if live_data and "error" not in live_data:
     </div>
     """, unsafe_allow_html=True)
 else:
-    # This shows the error if the scraper fails
     st.sidebar.error(f"Live Scraper Debug: {live_data.get('error') if live_data else 'Unknown Error'}")
     st.info("Live Front Lead data currently unavailable.")
 
@@ -194,8 +181,6 @@ else:
 try:
     df_all, sun_all = get_weather_data()
     now_nz = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=12))).replace(tzinfo=None)
-    
-    # Week 1
     s1 = sun_all.iloc[:7]
     st.markdown(f'<div class="section-label">Forecast: {s1.iloc[0]["date"].strftime("%b %d")}</div>', unsafe_allow_html=True)
     render_forecast_block(df_all, s1, show_now_line=True, now_ts=now_nz)
