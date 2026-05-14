@@ -6,7 +6,7 @@ import datetime
 import numpy as np
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Wellington Harbour Wind NIWA", layout="wide")
+st.set_page_config(page_title="Wellington Harbour Wind (Kts)", layout="wide")
 
 # --- CSS: MOBILE OPTIMIZATION ---
 st.markdown("""
@@ -38,21 +38,23 @@ st.markdown("""
             text-transform: uppercase;
         }
     </style>
-    <div class="custom-title">Harbour Front Lead (NIWA)</div>
+    <div class="custom-title">Harbour Front Lead (NIWA - Knots)</div>
 """, unsafe_allow_html=True)
 
 # --- SETTINGS ---
-# Updated to Front Lead coordinates
 LAT, LON = -41.319, 174.839
+# Conversion factor from m/s to knots
+MS_TO_KNOTS = 1.94384
 
 def get_color(val, alpha=1.0):
-    if val <= 5: return f"rgba(169, 201, 217, {alpha})"     # 0-5
-    if val <= 10: return f"rgba(92, 169, 204, {alpha})"    # 6-10
-    if val <= 15: return f"rgba(122, 214, 134, {alpha})"   # 11-15
-    if val <= 20: return f"rgba(255, 230, 109, {alpha})"   # 16-20
-    if val <= 25: return f"rgba(255, 126, 121, {alpha})"   # 21-25
-    if val <= 30: return f"rgba(224, 49, 49, {alpha})"     # 26-30
-    return f"rgba(153, 5, 5, {alpha})"                       # 31+
+    # Colors adjusted for knot ranges
+    if val <= 10: return f"rgba(169, 201, 217, {alpha})"    # 0-10 kts
+    if val <= 15: return f"rgba(92, 169, 204, {alpha})"    # 11-15 kts
+    if val <= 20: return f"rgba(122, 214, 134, {alpha})"   # 16-20 kts
+    if val <= 25: return f"rgba(255, 230, 109, {alpha})"   # 21-25 kts
+    if val <= 30: return f"rgba(255, 126, 121, {alpha})"   # 26-30 kts
+    if val <= 35: return f"rgba(224, 49, 49, {alpha})"     # 31-35 kts
+    return f"rgba(153, 5, 5, {alpha})"                     # 36+ kts
 
 @st.cache_data(ttl=600)
 def get_weather_data():
@@ -65,9 +67,13 @@ def get_weather_data():
         t = pd.to_datetime(f["datetime"])
         if t.tzinfo is not None:
             t = t.tz_convert("Pacific/Auckland").tz_localize(None)
-        speed_val = f.get("wind_speed_mean", f.get("wind_speed", 0))
+        
+        # Get raw speed (m/s) and convert to knots
+        speed_ms = f.get("wind_speed_mean", f.get("wind_speed", 0))
+        speed_kts = speed_ms * MS_TO_KNOTS
+        
         records.append({
-            "time": t, "speed": speed_val, "dir": f.get("wind_direction", 0)
+            "time": t, "speed": speed_kts, "dir": f.get("wind_direction", 0)
         })
     df = pd.DataFrame(records)
 
@@ -149,7 +155,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
             frac = (t_start - p1['time']).total_seconds() / duration if duration > 0 else 0
             interp_speed = p1['speed'] + frac * (p2['speed'] - p1['speed'])
 
-            # Calculate "Now" Speed for labeling
             if show_now_line and t_start <= now_ts < t_end:
                 seg_duration = (t_end - t_start).total_seconds()
                 now_frac = (now_ts - t_start).total_seconds() / seg_duration if seg_duration > 0 else 0
@@ -168,7 +173,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
                 mode='lines', showlegend=False, hoverinfo='skip'
             ))
 
-    # --- NOW LINE & CLOSE LABEL ---
     if show_now_line and now_ts:
         fig_main.add_vline(x=now_ts, line_width=1, line_dash="dash", line_color="white", opacity=0.6)
         if now_speed is not None:
@@ -182,7 +186,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
                 bgcolor="rgba(61, 90, 115, 0.6)"
             )
 
-    # Daytime Labels & Peak Annotations
     for _, day_sun in df_sun.iterrows():
         sr, ss = pd.Timestamp(day_sun['sunrise']), pd.Timestamp(day_sun['sunset'])
         midpoint = sr + (ss - sr) / 2
@@ -196,7 +199,6 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
                 fig_main.add_annotation(x=func['time'], y=func['speed'] + (offset/2.5), text="➤", textangle=heading-90, showarrow=False, font=dict(size=6, color="white"))
                 fig_main.add_annotation(x=func['time'], y=func['speed'] + offset, text=f"<b>{int(round(func['speed']))}</b>", showarrow=False, font=dict(size=8, color="white"))
 
-    # Night Shading & Moon Icon
     for i in range(len(df_sun)-1):
         ss = pd.Timestamp(df_sun.iloc[i]['sunset'])
         sr_next = pd.Timestamp(df_sun.iloc[i+1]['sunrise'])
