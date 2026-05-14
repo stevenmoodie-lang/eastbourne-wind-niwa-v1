@@ -43,7 +43,6 @@ st.markdown("""
 
 # --- SETTINGS ---
 LAT, LON = -41.319, 174.839
-KMH_TO_KNOTS = 0.539957
 
 def get_color(val, alpha=1.0):
     if val <= 10: return f"rgba(169, 201, 217, {alpha})"
@@ -56,7 +55,6 @@ def get_color(val, alpha=1.0):
 
 @st.cache_data(ttl=600)
 def get_weather_data():
-    # Fetch Open-Meteo for consistent 14-day data
     om_url = "https://api.open-meteo.com/v1/forecast"
     om_params = {
         "latitude": LAT, "longitude": LON,
@@ -148,6 +146,17 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
         if now_speed is not None:
             fig_main.add_annotation(x=now_ts, y=now_speed, text=f"<b>{int(round(now_speed))}</b>", showarrow=False, xanchor="left", xshift=5, font=dict(size=11, color=get_color(now_speed)), bgcolor="rgba(61, 90, 115, 0.6)")
     
+    # --- ADDED: High/Low Indicators ---
+    for _, day_sun in df_sun.iterrows():
+        sr, ss = pd.Timestamp(day_sun['sunrise']), pd.Timestamp(day_sun['sunset'])
+        day_mask = (df_hourly['time'] >= sr) & (df_hourly['time'] <= ss)
+        day_data = df_hourly[day_mask]
+        if not day_data.empty:
+            for func, offset in [(day_data.loc[day_data['speed'].idxmax()], 3.5), (day_data.loc[day_data['speed'].idxmin()], -3.5)]:
+                heading = (func['dir'] + 180) % 360
+                fig_main.add_annotation(x=func['time'], y=func['speed'] + (offset/2.5), text="➤", textangle=heading-90, showarrow=False, font=dict(size=6, color="white"))
+                fig_main.add_annotation(x=func['time'], y=func['speed'] + offset, text=f"<b>{int(round(func['speed']))}</b>", showarrow=False, font=dict(size=8, color="white"))
+
     # Sun markers/Night rects
     for _, day_sun in df_sun.iterrows():
         sr, ss = pd.Timestamp(day_sun['sunrise']), pd.Timestamp(day_sun['sunset'])
