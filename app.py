@@ -30,7 +30,7 @@ st.markdown("""
         }
         /* Live Report Styling */
         .live-container {
-            background: rgba(0, 0, 0, 0.2);
+            background: rgba(0, 0, 0, 0.3);
             border-radius: 10px;
             padding: 12px;
             margin-bottom: 1rem;
@@ -72,26 +72,28 @@ st.markdown("""
 LAT, LON = -41.319, 174.839
 KMH_TO_KNOTS = 0.539957
 
-# --- LIVE SCRAPER ---
-@st.cache_data(ttl=120) # Refresh live data every 2 minutes
+# --- LIVE SCRAPER (IMPROVED) ---
+@st.cache_data(ttl=120) 
 def get_front_lead_live():
     try:
         url = "https://www.centreport.co.nz/images/forms/PortWeather.html"
-        r = requests.get(url, timeout=10)
+        # Headers make us look like a real browser
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36'}
+        r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.text, 'lxml')
         table = soup.find('table')
         
-        for row in table.find_all('tr'):
-            cols = [ele.text.strip() for ele in row.find_all('td')]
-            if len(cols) > 0 and "Front Lead" in cols[0]:
-                # PortWeather.html format: [Location, Time, Direction, Mean, Max]
-                return {
-                    "time": cols[1],
-                    "dir": cols[2],
-                    "mean": cols[3],
-                    "gust": cols[4]
-                }
-    except:
+        if table:
+            for row in table.find_all('tr'):
+                cols = [ele.text.strip() for ele in row.find_all('td')]
+                if len(cols) > 4 and "Front Lead" in cols[0]:
+                    return {
+                        "time": cols[1],
+                        "dir": cols[2],
+                        "mean": cols[3],
+                        "gust": cols[4]
+                    }
+    except Exception as e:
         return None
     return None
 
@@ -228,7 +230,7 @@ def render_forecast_block(df_hourly, df_sun, show_now_line=False, now_ts=None):
 
 # --- EXECUTION ---
 
-# 1. Fetch Live Report
+# 1. Fetch Live Report (Now with better reliability)
 live_data = get_front_lead_live()
 
 # 2. Render Live Report Banner
@@ -255,6 +257,9 @@ if live_data:
         </div>
     </div>
     """, unsafe_allow_html=True)
+else:
+    # Optional: message if live data is temporarily down
+    st.info("Live Front Lead data currently unavailable.")
 
 # 3. Render Forecast Graphs
 try:
@@ -279,4 +284,4 @@ try:
         render_forecast_block(df_all[mask2], s2)
 
 except Exception as e:
-    st.error(f"Error: {e}")
+    st.error(f"Error loading forecast: {e}")
