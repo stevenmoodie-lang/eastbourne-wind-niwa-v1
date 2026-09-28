@@ -11,4 +11,4 @@ jobs:
     steps:
       - name: Send GET Request
         run: |
-          curl -sL -A "Mozilla/5.0" "https://eastbourne-wind-niwa-v1-9zdfvwdsj9appa3zkhtkfaf.streamlit.app/" > /dev/null
+          curl -s -A "Mozilla/5.0" "https://eastbourne-wind-niwa-v1-9zdfvwdsj9appa3zkhtkfaf.streamlit.app/" > /dev/null
