@@ -1,1 +1,15 @@
+name: Keep App Awake
 
+on:
+  schedule:
+    # Runs every day at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Allows manual run from GitHub UI
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send GET Request
+        run: |
+          curl -sL -A "Mozilla/5.0" "https://eastbourne-wind-niwa-v1-9zdfvwdsj9appa3zkhtkfaf.streamlit.app/" > /dev/null
