@@ -9,6 +9,38 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Send GET Request
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Playwright
         run: |
-          curl -s -A "Mozilla/5.0" "https://eastbourne-wind-niwa-v1-9zdfvwdsj9appa3zkhtkfaf.streamlit.app/" > /dev/null
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Load Streamlit App
+        run: |
+          python -c "
+          from playwright.sync_api import sync_playwright
+          import time
+
+          url = 'https://eastbourne-wind-niwa-v1-9zdfvwdsj9appa3zkhtkfaf.streamlit.app/'
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              page = browser.new_page()
+              print('Opening app...')
+              page.goto(url, timeout=90000)
+              time.sleep(5)
+
+              # If the app is asleep, click the wake button automatically
+              wake_button = page.locator('button:has-text(\"Yes, get this app back up!\")')
+              if wake_button.is_visible():
+                  print('App is sleeping. Clicking wake button...')
+                  wake_button.click()
+                  time.sleep(20) # Wait for container to boot
+
+              print('App loaded and session established.')
+              browser.close()
+          "
