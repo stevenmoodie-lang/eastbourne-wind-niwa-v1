@@ -42,7 +42,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- SETTINGS ---
-# Updated coordinates for Wellington Harbour entrance area
 LAT, LON = -41.319, 174.839 
 KMH_TO_KNOTS = 0.539957
 
@@ -54,6 +53,15 @@ def get_color(val, alpha=1.0):
     if val <= 25: return f"rgba(253, 174, 97, {alpha})"  # Orange (21-25)
     if val <= 30: return f"rgba(224, 49, 49, {alpha})"   # Red (26-30)
     return f"rgba(153, 5, 5, {alpha})"                   # Dark Red (31+)
+
+# --- FRONT LEAD CALIBRATION FUNCTION ---
+def calibrate_front_lead(speed):
+    if speed < 12:
+        return speed + 3.0
+    elif speed <= 20:
+        return speed * 1.25
+    else:
+        return speed * 1.4
 
 @st.cache_data(ttl=600)
 def get_weather_data():
@@ -94,6 +102,9 @@ def get_weather_data():
 
     except Exception:
         df_final = df_om
+
+    # Apply calibration multiplier to align model with live Front Lead sensor readings
+    df_final["speed"] = df_final["speed"].apply(calibrate_front_lead)
 
     sun = pd.DataFrame({
         "date": pd.to_datetime(r_om["daily"]["time"]).date,
