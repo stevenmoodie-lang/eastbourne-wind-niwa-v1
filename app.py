@@ -58,7 +58,7 @@ def get_color(val, alpha=1.0):
 def calibrate_front_lead(speed):
     if speed < 12:
         return speed + 3.0
-    elif speed <= 20:
+    elif speed <= 24:
         return speed * 1.25
     else:
         return speed * 1.4
